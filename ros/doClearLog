@@ -1,0 +1,3 @@
+#!/bin/bash
+rm -rf ~/.ros/log/*
+ls -al ~/.ros/log
