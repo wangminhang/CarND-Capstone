@@ -1,0 +1,11 @@
+ahoyapi: v2
+commands:
+
+  up:
+    usage: Start the docker container.
+    cmd: docker run -d -p 4567:4567 -v $PWD:/capstone -v /tmp/log:/root/.ros/ --rm --name carnd-capstone capstone  tail -f /dev/null
+
+  exec:
+    usage: run a command in the container.
+    cmd: docker exec -it carnd-capstone "$@"
+
