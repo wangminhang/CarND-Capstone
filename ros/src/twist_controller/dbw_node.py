@@ -35,9 +35,11 @@ class DBWNode(object):
     def __init__(self):
         rospy.init_node('dbw_node')
 
-        self.twisted = None
+        self.twisted = TwistStamped()
+        self.twisted.twist.linear.x = 100 #TODO: Currently hardcoding forward angular velocity until we get waypoints working.
         self.dbw_enabled = False
         self.current_velocity = 0.
+        self.current_velocity_last = None
 
         vehicle_mass = rospy.get_param('~vehicle_mass', 1736.35)
         fuel_capacity = rospy.get_param('~fuel_capacity', 13.5)
@@ -59,7 +61,10 @@ class DBWNode(object):
 
         self.controller = Controller(
             vehicle_mass=vehicle_mass,
-            fuel_capacity = fuel_capacity, #TODO: Add the rest of the vars (if relevant)
+            fuel_capacity = fuel_capacity, #TODO: Add the rest of the vars here (if relevant)
+            decel_limit = decel_limit,
+            accel_limit = accel_limit,
+            max_steer_angle = max_steer_angle,
         )
 
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb)
@@ -86,19 +91,24 @@ class DBWNode(object):
                     self.twisted.twist.linear.x,
                     self.twisted.twist.angular.z,
                     self.current_velocity,
+                    self.current_velocity_last,
+                    rospy.get_rostime(),
                 )
                 self.publish(throttle, brake, steering)
             rate.sleep()
 
     def twist_cmd_cb(self, msg):
+        #rospy.logerr(msg)
         self.twisted = msg
 
     def dbw_enabled_cb(self, msg):
+        #rospy.logerr(msg)
         self.dbw_enabled = msg
 
     def current_velocity_cb(self, msg):
+        #rospy.logerr(msg)
+        self.current_velocity_last = msg.header.stamp
         self.current_velocity = msg.twist.linear.x
-
 
     def publish(self, throttle, brake, steer):
         tcmd = ThrottleCmd()
