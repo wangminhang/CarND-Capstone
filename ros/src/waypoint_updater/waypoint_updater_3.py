@@ -80,7 +80,7 @@ def stampHeader(theHeader, theSequenceNumber, theFrameId):
     theHeader.seq=theSequenceNumber
     theHeader.frame_id=theFrameId
 
-TESTINGWAYPOINTUPDATER=True
+TESTINGWAYPOINTUPDATER=False
 UNITTESTINGWAYPOINTUPDATER=False
 DEBUGISWAYPOINTINFRONT=False
 DEBUGPOSESTAMPEDYAW=False
@@ -194,6 +194,7 @@ class WaypointUpdater(object):
 
     INITIALTEMPORARYVELOCITY=milesPerHourToMetersPerSecond(10.);# 10 mph
     sequenceNumberForFinalWaypoints=0
+
     def createFinalWaypoints(self, firstWaypoint):
         waypoints=[]
         waypointSequenceNumber=0
@@ -232,6 +233,7 @@ class WaypointUpdater(object):
 
     previousFirstWaypoint=-1;
     firstWaypointRepeating=0
+
     def pose_cb(self, vehiclePoseStamped):
         # TODO: Implement
         #poseDictionary = message_converter.convert_ros_message_to_dictionary(vehiclePoseStamped)
