@@ -1,9 +1,12 @@
 import rospy
 from pid import PID
+from yaw_controller import YawController
+from lowpass import LowPassFilter
 
 GAS_DENSITY = 2.858
 ONE_MPH = 0.44704
 SPEED_LIMIT_MPS = 40.0 * ONE_MPH # Assume 40 mph is speed limit for now.
+TEMP_STEER = -8
 
 
 class Controller(object):
@@ -12,13 +15,20 @@ class Controller(object):
         self.accel_limit = kwargs['accel_limit']
         self.throttle_PID = PID(2, 0, 0) # TODO: optimize these weights on P, I, and D.
         self.last_stamp = None # ros timestamp of the last time control() was called.
-        # TODO: Add steering PID controller.
+        self.yaw_controller = YawController(kwargs['wheel_base'],
+                                            kwargs['steer_ratio'],
+                                            ONE_MPH,
+                                            kwargs['max_lat_accel'],
+                                            kwargs['max_steer_angle'])
+        self.filter = LowPassFilter(0.2, 0.1)
 
 
     def control(self, target_x_vel, target_ang_vel, curr_x_vel, dbw_enabled):
-        target_x_vel = SPEED_LIMIT_MPS
+        # TODO: Remove these hardcoded variables and use the parameters.
+        #target_x_vel = SPEED_LIMIT_MPS
+        #target_ang_vel = TEMP_STEER
 
-        if self.last_stamp is None or dbw_enabled:
+        if self.last_stamp is None or not dbw_enabled:
             self.last_stamp = rospy.get_time() # On the first pass, just initialize last_stamp.
             # Reset the PID Controllers just in case.
             self.throttle_PID.reset()
@@ -47,10 +57,17 @@ class Controller(object):
         else:
             brake = 0
 
-        #TODO: How do we convert max_steer_angle to angular velocity?
-        # I assume max_steer_angle is the steering wheel angle and not angle of the wheels?
+
+        # Uses the provided yaw_controller, which takes lateral acceleration into
+        # account (the faster you go, the smaller the max angle at the wheels.
+        steer = self.yaw_controller.get_steering(target_x_vel,
+                                                 target_ang_vel,
+                                                 curr_x_vel)
+
+        # TODO: Do we need to use the lowpass filter, why?
+        #steer = self.filter.filt(steer)
 
         # Update the last time.
         self.last_stamp = rospy.get_time()
 
-        return throttle, brake, 0.
+        return throttle, brake, steer

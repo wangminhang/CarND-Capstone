@@ -61,10 +61,13 @@ class DBWNode(object):
 
         self.controller = Controller(
             vehicle_mass=vehicle_mass,
-            fuel_capacity = fuel_capacity, #TODO: Add the rest of the vars here (if relevant)
-            decel_limit = decel_limit,
-            accel_limit = accel_limit,
-            max_steer_angle = max_steer_angle,
+            fuel_capacity=fuel_capacity, #TODO: Add the rest of the vars here (if relevant)
+            decel_limit=decel_limit,
+            accel_limit=accel_limit,
+            max_steer_angle=max_steer_angle,
+            wheel_base=wheel_base,
+            steer_ratio=steer_ratio,
+            max_lat_accel=max_lat_accel,
         )
 
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb)
