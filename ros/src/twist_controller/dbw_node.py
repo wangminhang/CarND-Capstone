@@ -94,7 +94,7 @@ class DBWNode(object):
 
     def dbw_enabled_cb(self, msg):
         #rospy.logerr(msg)
-        self.dbw_enabled = msg
+        self.dbw_enabled = msg.data
 
     def current_velocity_cb(self, msg):
         #rospy.logerr(msg)
