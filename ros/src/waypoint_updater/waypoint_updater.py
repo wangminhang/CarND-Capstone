@@ -24,7 +24,7 @@ as well as to verify your TL classifier.
 TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
-DEBUG = os.getenv('DEBUG', 1)
+DEBUG = os.getenv('DEBUG', False)
 DEBUGGER_HOST = os.getenv('DEBUGGER_HOST', 'docker.for.mac.localhost')
 DEBUGGER_PORT = int(os.getenv('DEBUGGER_PORT', '8989'))
 
@@ -44,16 +44,6 @@ if DEBUG:
 
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
-
-def pi():
-    return math.pi
-
-def deg2rad(x):
-    return x * pi() / 180.
-
-def rad2deg(x):
-    return x * 180. / pi()
-
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -89,21 +79,21 @@ class WaypointUpdater(object):
         yaw = euler[2]
         return yaw
 
-    def get_closest_waypoint(self):
+    def get_closest_waypoint(self, pose, waypoints):
         closest_wp_idx = None
         closest_wp_dist = 10 ** 10  # some really big distance.
-        yaw = self.get_yaw(self.pose.orientation)
+        yaw = self.get_yaw(pose.orientation)
 
         # TODO: Is this necessary?
         #if not self.base_waypoints or len(self.base_waypoints) == 0:
         #    return closest_wp_idx, closest_wp_dist
 
         # Compute the waypoints ahead of the current_pose
-        base_wp_len = len(self.base_waypoints)
+        base_wp_len = len(waypoints)
         for i in range(base_wp_len):
-            wp_pos = self.base_waypoints[i].pose.pose.position
+            wp_pos = waypoints[i].pose.pose.position
             wp_x, wp_y, _ = self.convert_coord(
-                (self.pose.position.x, self.pose.position.y, yaw),
+                (pose.position.x, pose.position.y, yaw),
                 (wp_pos.x, wp_pos.y, 0)
             )
             dist = math.sqrt((wp_x** 2) +(wp_y** 2))
@@ -136,7 +126,7 @@ class WaypointUpdater(object):
             rospy.logwarn("waiting for all data..")
             return
 
-        closest_wp_idx, closest_wp_dist = self.get_closest_waypoint()
+        closest_wp_idx, closest_wp_dist = self.get_closest_waypoint(self.pose, self.base_waypoints)
         if not closest_wp_idx:
             return
 
