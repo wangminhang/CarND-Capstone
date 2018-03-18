@@ -24,7 +24,7 @@ as well as to verify your TL classifier.
 TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
-DEBUG = os.getenv('DEBUG', 1)
+DEBUG = os.getenv('DEBUG', False)
 DEBUGGER_HOST = os.getenv('DEBUGGER_HOST', 'docker.for.mac.localhost')
 DEBUGGER_PORT = int(os.getenv('DEBUGGER_PORT', '8989'))
 
