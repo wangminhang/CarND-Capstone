@@ -44,7 +44,7 @@ class Controller(object):
         # rospy.logerr("throttle %s", throttle)
 
         # Make sure the returned throttle is within limits.
-        throttle = max(0.0, min(1.0, throttle))
+        throttle = max(-1.0, min(1.0, throttle))
 
         # TODO: Do we care about the acceleration and jerk here?
         if throttle < 0:
