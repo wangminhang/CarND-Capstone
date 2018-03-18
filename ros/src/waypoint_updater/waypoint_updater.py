@@ -45,16 +45,6 @@ if DEBUG:
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
 
-def pi():
-    return math.pi
-
-def deg2rad(x):
-    return x * pi() / 180.
-
-def rad2deg(x):
-    return x * 180. / pi()
-
-
 class WaypointUpdater(object):
     def __init__(self):
         rospy.init_node('waypoint_updater')
