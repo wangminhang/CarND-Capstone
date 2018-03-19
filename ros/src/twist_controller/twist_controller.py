@@ -13,7 +13,7 @@ class Controller(object):
     def __init__(self, *args, **kwargs):
 
         self.accel_limit = kwargs['accel_limit']
-        self.throttle_PID = PID(200, 10, 1) # TODO: optimize these weights on P, I, and D.
+        self.throttle_PID = PID(200, 0, 0) # TODO: optimize these weights on P, I, and D.
         self.last_stamp = None # ros timestamp of the last time control() was called.
         self.yaw_controller = YawController(kwargs['wheel_base'],
                                             kwargs['steer_ratio'],
@@ -59,7 +59,7 @@ class Controller(object):
             # Brake values passed to publish should be in units of torque (N*m).
             # The correct values for brake can be computed using the desired
             # acceleration, weight of the vehicle, and wheel radius.
-            brake = (vel_err_adj) * self.vehicle_mass * self.wheel_radius
+            brake = (-vel_err) * self.vehicle_mass * self.wheel_radius
             throttle = 0
 
         # NOTE: Using the current P: 2, I:0, and D:0, the car breaks a bit slowly.
