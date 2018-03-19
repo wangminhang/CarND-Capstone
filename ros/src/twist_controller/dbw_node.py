@@ -36,7 +36,6 @@ class DBWNode(object):
         rospy.init_node('dbw_node')
 
         self.twisted = TwistStamped()
-        self.twisted.twist.linear.x = 100 #TODO: Currently hardcoding forward angular velocity until we get waypoints working.
         self.dbw_enabled = False
         self.current_velocity = 0.
         self.current_velocity_last = None
@@ -68,6 +67,7 @@ class DBWNode(object):
             wheel_base=wheel_base,
             steer_ratio=steer_ratio,
             max_lat_accel=max_lat_accel,
+            wheel_radius=wheel_radius,
         )
 
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb)
@@ -79,16 +79,18 @@ class DBWNode(object):
     def loop(self):
         rate = rospy.Rate(50) # 50Hz
         while not rospy.is_shutdown():
-            # Update the controller, even if DWB is not enabled.
-            throttle, brake, steering = self.controller.control(
-                self.twisted.twist.linear.x,
-                self.twisted.twist.angular.z,
-                self.current_velocity,
-                self.dbw_enabled,
-            )
-            # Only publish if dbw (Drive By Wire) is enabled.
-            if self.dbw_enabled:
-                self.publish(throttle, brake, steering)
+            if self.twisted:
+                # Update the controller, even if DWB is not enabled.
+                throttle, brake, steering = self.controller.control(
+                    self.twisted.twist.linear.x,
+                    self.twisted.twist.angular.z,
+                    self.current_velocity,
+                    self.dbw_enabled,
+                )
+                # Only publish if dbw (Drive By Wire) is enabled.
+                if self.dbw_enabled:
+                    rospy.logerr("brake %s", (throttle, brake, steering))
+                    self.publish(throttle, brake, steering)
             rate.sleep()
 
     def twist_cmd_cb(self, msg):
