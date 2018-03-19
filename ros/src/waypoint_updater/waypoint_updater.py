@@ -3,7 +3,7 @@
 import rospy
 import tf
 from geometry_msgs.msg import PoseStamped,  Quaternion, TwistStamped
-from styx_msgs.msg import Lane, Waypoint
+from styx_msgs.msg import Lane, Waypoint, TrafficLightArray
 from std_msgs.msg import Int32, Header
 import os
 
@@ -49,20 +49,31 @@ class WaypointUpdater(object):
     def __init__(self):
         rospy.init_node('waypoint_updater')
 
-        rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb, queue_size=1)
-        rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
-
-        # TODO: Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
-        rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
-        rospy.Subscriber('/obstacle_waypoint', Int32, self.obstacle_cb)
+        # For mocking the traffic light status.
+        rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_light_mock_cb, queue_size=1)
+        self.mock_traffic_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
 
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         # TODO: Add other member variables you need below
         self.pose = None
         self.base_waypoints = None
-        self.traffic_waypoints = None
         self.obstacle_waypoints = None
+        self.next_traffic_wp_idx = None
+        self.current_velocity = None
+
+        self.decel_limit = rospy.get_param('~decel_limit', -5)
+        self.accel_limit = rospy.get_param('~accel_limit', 1.)
+
+
+        rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb,
+                         queue_size=1)
+        rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
+
+        rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
+        rospy.Subscriber('/obstacle_waypoint', Int32, self.obstacle_cb)
+        rospy.Subscriber('/current_velocity', TwistStamped,
+                         self.current_velocity_cb)
 
         self.loop()
 
@@ -117,29 +128,87 @@ class WaypointUpdater(object):
             # Run on it's own thread and we NEED to have something like
             # This loop, or the node will just end.
             rate.sleep()
+            # Make sure we've got valid data before publishing
+            if not self.pose or not self.base_waypoints or not self.next_traffic_wp_idx:
+                rospy.logwarn("waiting for all data..")
+                continue
+
+            closest_wp_idx, closest_wp_dist = self.get_closest_waypoint(
+                self.pose, self.base_waypoints)
+            if not closest_wp_idx:
+                continue
+
+            # Note: it's not necessary to set the header info like stamp, seq, frame_id, etc.
+            lane = Lane()
+
+            base_wp_len = len(self.base_waypoints)
+
+            # vel_inc = self.current_velocity / n_waypoints_to_light
+            rospy.logwarn("---------------:  %s", self.current_velocity)
+            vel = self.current_velocity
+            for i in range(LOOKAHEAD_WPS):
+                this_wp_idx = (closest_wp_idx + i) % base_wp_len
+                next_wp_idx = (closest_wp_idx + i + 1) % base_wp_len
+                n_waypoints_to_light = self.next_traffic_wp_idx - this_wp_idx
+                dist_to_light = self.distance(self.base_waypoints, this_wp_idx,
+                                              self.next_traffic_wp_idx)
+
+                if vel <= 0:
+                    time_until_light = 10 ** 10  # Big number
+                else:
+                    time_until_light = dist_to_light / vel
+
+                if n_waypoints_to_light == 0:
+                    vel = 0
+
+                # Light is ahead of this point.
+                elif n_waypoints_to_light >= 0:
+                    if time_until_light < 5:
+                        # should we start breaking yet?
+                        dist_to_next = self.distance(self.base_waypoints,
+                                                     this_wp_idx, next_wp_idx)
+                        time_until_next = dist_to_next / vel
+                        accel_required = dist_to_light / (
+                        time_until_light ** 2)
+
+                        vel -= accel_required * time_until_next
+                    else:
+                        vel = min(vel + 1, 50)  # TODO: Don't Hardcode.
+                else:
+                    vel = min(vel + 1, 50)  # TODO: Don't Hardcode.
+
+                rospy.logwarn("vel:  %s", vel)
+                # rospy.logwarn("n_waypoints_to_light:  %s", n_waypoints_to_light)
+
+                self.set_waypoint_velocity(self.base_waypoints, next_wp_idx,
+                                           vel)
+                lane.waypoints.append(self.base_waypoints[next_wp_idx])
+
+            # publish the waypoints
+            self.final_waypoints_pub.publish(lane)
+
+    def traffic_light_mock_cb(self, msg):
+        if self.base_waypoints:
+            i, dist = self.get_closest_waypoint(self.pose, msg.lights)
+            #rospy.logwarn("nearest tl: %s", msg.lights[i].pose.pose)
+
+            # TODO: May need to get the traffic line and not just the wp closest to the light?
+            # config_string = rospy.get_param("/traffic_light_config")
+            # self.config = yaml.load(config_string)
+
+            nearest_wp_idx, dist = self.get_closest_waypoint(msg.lights[i].pose.pose, self.base_waypoints)
+
+            #rospy.logwarn("nearest tl: %s", nearest_wp_idx)
+            self.mock_traffic_light_pub.publish(nearest_wp_idx)
+
+    def current_velocity_cb(self, msg):
+        # rospy.logerr(msg)
+        self.current_velocity = msg.twist.linear.x
 
     def pose_cb(self, msg):
         self.pose = msg.pose
 
-        # Make sure we've got valid data before publishing
-        if not self.pose or not self.base_waypoints:
-            rospy.logwarn("waiting for all data..")
-            return
 
-        closest_wp_idx, closest_wp_dist = self.get_closest_waypoint(self.pose, self.base_waypoints)
-        if not closest_wp_idx:
-            return
-
-        # Note: it's not necessary to set the header info like stamp, seq, frame_id, etc.
-        lane = Lane()
-        base_wp_len = len(self.base_waypoints)
-        for i in range(LOOKAHEAD_WPS):
-            # for i in range(200):
-            next_wp_idx = (closest_wp_idx + i) % base_wp_len
-            lane.waypoints.append(self.base_waypoints[next_wp_idx])
-
-        # publish the waypoints
-        self.final_waypoints_pub.publish(lane)
 
     def waypoints_cb(self, msg):
         rospy.logwarn("waypoints_cb N:  %s", len(msg.waypoints))
@@ -148,7 +217,8 @@ class WaypointUpdater(object):
 
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
-        self.traffic_waypoints = msg
+        self.next_traffic_wp_idx = msg.data
+        #rospy.logwarn("traffic wp:  %s", msg)
 
     def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later

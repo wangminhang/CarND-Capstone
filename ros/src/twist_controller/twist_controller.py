@@ -13,7 +13,7 @@ class Controller(object):
     def __init__(self, *args, **kwargs):
 
         self.accel_limit = kwargs['accel_limit']
-        self.throttle_PID = PID(2, 0, 0) # TODO: optimize these weights on P, I, and D.
+        self.throttle_PID = PID(200, 10, 1) # TODO: optimize these weights on P, I, and D.
         self.last_stamp = None # ros timestamp of the last time control() was called.
         self.yaw_controller = YawController(kwargs['wheel_base'],
                                             kwargs['steer_ratio'],
@@ -21,6 +21,11 @@ class Controller(object):
                                             kwargs['max_lat_accel'],
                                             kwargs['max_steer_angle'])
         self.filter = LowPassFilter(0.2, 0.1)
+
+        self.vehicle_mass = kwargs['vehicle_mass'] + kwargs['fuel_capacity'] * GAS_DENSITY
+        self.wheel_radius = kwargs['wheel_radius']
+        self.decel_limit = kwargs['decel_limit']
+
 
 
     def control(self, target_x_vel, target_ang_vel, curr_x_vel, dbw_enabled):
@@ -39,16 +44,22 @@ class Controller(object):
 
         # Note: vel_err is positive when car is too slow and negative when going too fast.
         vel_err = target_x_vel - curr_x_vel
+        vel_err_adj = max(self.decel_limit * time_delta, min(target_x_vel - curr_x_vel, self.accel_limit * time_delta))
         # rospy.logerr("vel_err %s", vel_err)
-        throttle = self.throttle_PID.step(vel_err, time_delta)
+        throttle = self.throttle_PID.step(vel_err_adj, time_delta)
         # rospy.logerr("throttle %s", throttle)
 
         # Make sure the returned throttle is within limits.
         throttle = max(-1.0, min(1.0, throttle))
+        rospy.logerr("throttle %s", throttle)
+        rospy.logwarn("vel_err, time_delta %s", (target_x_vel,  vel_err, vel_err_adj, time_delta))
 
         # TODO: Do we care about the acceleration and jerk here?
         if throttle < 0:
-            brake = -throttle
+            # Brake values passed to publish should be in units of torque (N*m).
+            # The correct values for brake can be computed using the desired
+            # acceleration, weight of the vehicle, and wheel radius.
+            brake = (vel_err_adj) * self.vehicle_mass * self.wheel_radius
             throttle = 0
 
         # NOTE: Using the current P: 2, I:0, and D:0, the car breaks a bit slowly.
