@@ -120,7 +120,7 @@ class WaypointUpdater(object):
         :return: None
         """
         # limit publishing rate (uses rate.sleep later)
-        rate = rospy.Rate(1)
+        rate = rospy.Rate(10)
         while not rospy.is_shutdown():
             rospy.logwarn("loop pose: %s", self.pose)
 
@@ -163,7 +163,7 @@ class WaypointUpdater(object):
 
                 # Light is ahead of this point.
                 elif n_waypoints_to_light >= 0:
-                    if time_until_light < 5:
+                    if time_until_light < 10:
                         # should we start breaking yet?
                         dist_to_next = self.distance(self.base_waypoints,
                                                      this_wp_idx, next_wp_idx)
@@ -177,7 +177,7 @@ class WaypointUpdater(object):
                 else:
                     vel = min(vel + 1, 50)  # TODO: Don't Hardcode.
 
-                rospy.logwarn("vel:  %s", vel)
+                #rospy.logwarn("vel:  %s", vel)
                 # rospy.logwarn("n_waypoints_to_light:  %s", n_waypoints_to_light)
 
                 self.set_waypoint_velocity(self.base_waypoints, next_wp_idx,
