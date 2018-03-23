@@ -7,9 +7,12 @@ from styx_msgs.msg import Lane
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from light_classification.tl_classifier import TLClassifier
+from light_classification.tl_detector import TrafficLightDetector
 import tf
 import cv2
 import yaml
+
+import numpy as np
 
 STATE_COUNT_THRESHOLD = 3
 
@@ -42,12 +45,17 @@ class TLDetector(object):
 
         self.bridge = CvBridge()
         self.light_classifier = TLClassifier()
+        self.light_detector = TrafficLightDetector(0.7)
+
         self.listener = tf.TransformListener()
 
         self.state = TrafficLight.UNKNOWN
         self.last_state = TrafficLight.UNKNOWN
         self.last_wp = -1
         self.state_count = 0
+
+        # warm up tf
+        detections = self.light_detector.get_detection(np.zeros((600, 800, 3)).astype(np.uint8))
 
         rospy.spin()
 
@@ -71,14 +79,6 @@ class TLDetector(object):
         self.has_image = True
         self.camera_image = msg
         light_wp, state = self.process_traffic_lights()
-
-        try:
-            cv2_img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-        except CvBridgeError as e:
-            print(e)
-        else:
-            if msg.header.seq % 10 == 0:
-                cv2.imwrite('/home/user2/Documents/snaps/{}.jpeg'.format(msg.header.seq / 10), cv2_img)
 
         '''
         Publish upcoming red lights at camera frequency.
@@ -121,14 +121,35 @@ class TLDetector(object):
             int: ID of traffic light color (specified in styx_msgs/TrafficLight)
 
         """
+        if self.light_detector is None or self.light_classifier is None:
+            return TrafficLight.RED
+
         if(not self.has_image):
             self.prev_light_loc = None
             return False
 
-        cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
+        cv_image = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8"), cv2.COLOR_BGR2RGB)
+
+        # get tl detections
+        detections = self.light_detector.get_detection(cv_image)
 
         #Get classification
-        return self.light_classifier.get_classification(cv_image)
+        tl_type = self.light_classifier.get_classification(cv_image, detections)
+
+        state = 'UNKNOWN'
+
+        if tl_type == 0:
+            state = 'RED'
+        elif tl_type == 1:
+            state = 'YELLOW'
+        elif tl_type == 2:
+            state = 'GREEN'
+        elif tl_type == 4:
+            state = 'UNKNOWN'
+
+        rospy.logerr('TL STATE: {}'.format(state))
+
+        return tl_type
 
     def process_traffic_lights(self):
         """Finds closest visible traffic light, if one exists, and determines its
@@ -140,6 +161,8 @@ class TLDetector(object):
 
         """
         light = None
+
+        state = self.get_light_state(light)
 
         # List of positions that correspond to the line to stop in front of for a given intersection
         stop_line_positions = self.config['stop_line_positions']
