@@ -6,24 +6,32 @@ import copy
 
 import os
 import glob
+import cv2
 
 from lxml import etree
 
-DATA_DIR = '/home/user2/Documents/tl_detector/snaps'
-XMLS_DIR = '/home/user2/Documents/tl_detector/ssd_large/xmls'
-DETS_DIR = '/home/user2/Documents/tl_detector/ssd_large/detections'
 
-image_names = glob.glob(DATA_DIR + '/*.jpeg')
+DATA_DIR = '/home/vlad/Documents/ros_site/snaps'
+XMLS_DIR = '/home/vlad/Documents/ros_site/xmls_coco'
+DETS_DIR = '/home/vlad/Documents/ros_site/detections_coco'
 
-outfile = os.path.join(DETS_DIR, 'filelist.txt')
 
-if not os.path.exists(XMLS_DIR):
-    os.makedirs(XMLS_DIR)
+# if not os.path.exists(XMLS_DIR):
+#     os.makedirs(XMLS_DIR)
+#
+# if not os.path.exists(DETS_DIR):
+#     os.makedirs(DETS_DIR)
 
-if not os.path.exists(DETS_DIR):
-    os.makedirs(DETS_DIR)
+# f = open(outfile, 'w')
 
-f = open(outfile, 'w')
+def ensure_dir_created(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def ensure_anno_dirs_created():
+    ensure_dir_created(DATA_DIR)
+    ensure_dir_created(XMLS_DIR)
+    ensure_dir_created(DETS_DIR)
 
 def load_inference_graph(inference_graph_path):
     od_graph = tf.Graph()
@@ -35,7 +43,19 @@ def load_inference_graph(inference_graph_path):
             tf.import_graph_def(od_graph_def, name='')
     return od_graph
 
-def visualize(sess, image, scres, bxes, clases, impath):
+
+# gamma correction function used to reduce high sun exposure
+def adjust_gamma(image, gamma=1.0):
+    # build a lookup table mapping the pixel values [0, 255] to
+    # their adjusted gamma values
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255
+                      for i in np.arange(0, 256)]).astype("uint8")
+
+    # apply gamma correction using the lookup table
+    return cv2.LUT(image, table)
+
+def visualize(image, scres, bxes, classes, impath):
 
     tokens = impath.split('/')
     imname = tokens[-1]
@@ -48,9 +68,9 @@ def visualize(sess, image, scres, bxes, clases, impath):
 
     size_child = etree.SubElement(root, 'size')
     width_child = etree.SubElement(size_child, 'width')
-    width_child.text = '800'
+    width_child.text = "{}".format(image.shape[1])
     height_child = etree.SubElement(size_child, 'height')
-    height_child.text = '600'
+    height_child.text = "{}".format(image.shape[0])
     depth_child = etree.SubElement(size_child, 'depth')
     depth_child.text = '3'
 
@@ -61,12 +81,15 @@ def visualize(sess, image, scres, bxes, clases, impath):
 
         scores_b = scres[batch_index]
         boxes_b = bxes[batch_index]
-        classes_b = clases[batch_index]
+        classes_b = classes[batch_index]
+        # classes_b = clases[batch_index]
 
         for index in range(len(scores_b)):
             # if int(classes_b[index]) != 10: continue
+            if classes_b[index] != 10:
+                continue
 
-            if scores_b[index] > 0.7:
+            if scores_b[index] > 0.3:
                 box = boxes_b[index]
 
                 [y1, x1, y2, x2] = [box[0] * height, box[1] * width, box[2] * height, box[3] * width]
@@ -88,18 +111,88 @@ def visualize(sess, image, scres, bxes, clases, impath):
                 ymax_child = etree.SubElement(bndbox_child, 'ymax')
                 ymax_child.text = str(y2)
 
-                f.write('{} {} {} {} {} {} {}\n'.format(impath, str(index),
-                    str(int(classes_b[index])), str(x1), str(y1), str(x2), str(y2)))
+                # f.write('{} {} {} {} {} {} {}\n'.format(impath, str(index),
+                #     str(int(classes_b[index])), str(x1), str(y1), str(x2), str(y2)))
 
         et = etree.ElementTree(root)
         et.write(xmlpath, pretty_print=True)
         cv2.imwrite(os.path.join(DETS_DIR, imname), img)
 
+
+def visualize_norm(image, scres, bxes, impath):
+    tokens = impath.split('/')
+    imname = tokens[-1]
+    xmlpath = os.path.join(XMLS_DIR, imname.split('.')[0] + '.xml')
+
+    root = etree.Element('annotation')
+
+    filename_child = etree.SubElement(root, 'filename')
+    filename_child.text = imname
+
+    size_child = etree.SubElement(root, 'size')
+    width_child = etree.SubElement(size_child, 'width')
+    width_child.text = "{}".format(image.shape[1])
+    height_child = etree.SubElement(size_child, 'height')
+    height_child.text = "{}".format(image.shape[0])
+    depth_child = etree.SubElement(size_child, 'depth')
+    depth_child.text = '3'
+
+    for batch_index in range(len(scres)):
+        img = copy.copy(image)
+
+        height, width = image.shape[:2]
+
+        scores_b = scres[batch_index]
+        boxes_b = bxes[batch_index]
+        # classes_b = clases[batch_index]
+
+        for index in range(len(scores_b)):
+            # if int(classes_b[index]) != 10: continue
+
+            if scores_b[index] > 0.7:
+                box = boxes_b[index]
+
+                [y1, x1, y2, x2] = [box[0], box[1], box[2], box[3]]
+                [y1, x1, y2, x2] = [int(y1), int(x1), int(y2), int(x2)]
+
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+                object_child = etree.SubElement(root, 'object')
+                name_child = etree.SubElement(object_child, 'name')
+                name_child.text = 'traffic light'
+
+                bndbox_child = etree.SubElement(object_child, 'bndbox')
+                xmin_child = etree.SubElement(bndbox_child, 'xmin')
+                xmin_child.text = str(x1)
+                ymin_child = etree.SubElement(bndbox_child, 'ymin')
+                ymin_child.text = str(y1)
+                xmax_child = etree.SubElement(bndbox_child, 'xmax')
+                xmax_child.text = str(x2)
+                ymax_child = etree.SubElement(bndbox_child, 'ymax')
+                ymax_child.text = str(y2)
+
+                # f.write('{} {} {} {} {} {} {}\n'.format(impath, str(index),
+                #     str(int(classes_b[index])), str(x1), str(y1), str(x2), str(y2)))
+
+        et = etree.ElementTree(root)
+        et.write(xmlpath, pretty_print=True)
+        cv2.imwrite(os.path.join(DETS_DIR, imname), img)
+
+
 def placeholder(vis=False):
     inference_graph = load_inference_graph(inference_graph_path)
     config = tf.ConfigProto(allow_soft_placement=True)
 
+    config = tf.ConfigProto(
+        device_count={'CPU': 1, 'GPU': 0},
+        allow_soft_placement=True,
+        log_device_placement=False
+    )
+
     times = []
+
+    image_names = glob.glob(DATA_DIR + '/*.png')
+    outfile = os.path.join(DETS_DIR, 'filelist.txt')
 
     with tf.Session(config=config, graph=inference_graph) as sess:
         sess.run(tf.initialize_all_variables())
@@ -114,16 +207,17 @@ def placeholder(vis=False):
             print('Started {} {}'.format(index, image_path))
 
             image=cv2.imread(image_path)
+            image = adjust_gamma(image, gamma=1.15)
 
-            image1 = np.array(np.expand_dims(image,0))
+            image1 = np.array(np.expand_dims(image[:,:, ::-1],0))
             start = time.time()
             (bxes, scres, cls, num_det) = sess.run(
-                [boxes, scores, classes, num_detections],feed_dict={image_tensor:image1.astype(np.uint8)})
+                [boxes, scores, classes, num_detections], feed_dict={image_tensor:image1.astype(np.uint8)})
 
             stop = time.time()
 
             if vis:
-                visualize(sess, image, scres, bxes, cls, image_path)
+                visualize(image, scres, bxes, cls, image_path)
 
             if index > 10:
                 times.append(stop - start)
@@ -131,12 +225,12 @@ def placeholder(vis=False):
             print('Done {} {}'.format(index, image_path))
 
     avg_time = np.sum(times) / len(times)
-    print('Feeding input placeholder avg time %f s' % avg_time)
+    # print('Feeding input placeholder avg time %f s' % avg_time)
 
-import cv2
-inference_graph_path = '/home/user2/dev/tensorflow/tensorflow/models/research/object_detection/graphs/traffic_light_ssd_mobilenet_v1_large/frozen_inference_graph.pb'
-print('Given pb : %s' % inference_graph_path)
+# inference_graph_path = '/home/user2/dev/tensorflow/tensorflow/models/research/object_detection/graphs/traffic_light_ssd_mobilenet_v1_large/frozen_inference_graph.pb'
 
-placeholder(vis=True)
-
-f.close()
+if __name__ == "__main__":
+    inference_graph_path = '/home/vlad/git/obstacle-detection/instance-od/od_api/research/object_detection/pretrained/ssd_mobilenet_v1_coco_2017_11_17/frozen_inference_graph.pb'
+    print('Given pb : %s' % inference_graph_path)
+    ensure_anno_dirs_created()
+    placeholder(vis=True)

@@ -5,11 +5,11 @@ from lxml import etree
 import numpy as np
 from enum import Enum
 
-DATASET_DIR = "./dataset/tl_detector"
-ANNOS_DIR = "xmls"
+DATASET_DIR = "/home/vlad/Documents/ros_site"
+ANNOS_DIR = "xmls_coco"
 IMGS_DIR = "snaps"
-CROPS_DIR = "crops"
-LABELS_DIR = "labels"
+CROPS_DIR = "crops_gama"
+LABELS_DIR = "labels_gama"
 
 label_map_dict = { 'traffic light': 1}
 labels = ['traffic light']
@@ -22,7 +22,37 @@ class Color(Enum):
     RED = 1
     GREEN = 2
 
-color_labels = ["UNK", "RED", "GREEN"]
+color_labels = {
+
+  Color.UNKNOWN : "UNK",
+  Color.RED: "RED",
+  Color.GREEN: "GREEN"
+
+  }
+
+
+# gamma correction function used to reduce high sun exposure
+def adjust_gamma(image, gamma=1.0):
+    # build a lookup table mapping the pixel values [0, 255] to
+    # their adjusted gamma values
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255
+                      for i in np.arange(0, 256)]).astype("uint8")
+
+    # apply gamma correction using the lookup table
+    return cv2.LUT(image, table)
+
+
+def adjust_saturation(image, sat):
+  hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+  h, s, v = cv2.split(hsv)
+  hsv[:, :, 1] = hsv[:, :, 1] * sat
+  hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+  return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+
+def preprocess_pipeline(img):
+  return adjust_saturation(adjust_gamma(img, gamma=0.4), sat=0.6)
 
 
 def recursive_parse_xml_to_dict(xml):
@@ -176,6 +206,8 @@ def extract_crops(img_path, xml_file, crops_dir, label_dir):
   img = cv2.imread(img_path)
   xmin, ymin, xmax, ymax, classes_text, classes, height, width = read_xml(xml_file)
 
+  img = preprocess_pipeline(img)
+
   img_split = os.path.split(img_path)[-1]
   img_no_ext = os.path.splitext(img_split)[0]
 
@@ -184,13 +216,14 @@ def extract_crops(img_path, xml_file, crops_dir, label_dir):
   for i in range(num_obj):
     bbox = [ymin[i], ymax[i], xmin[i], xmax[i]]
     img_crop = img[bbox[0]:bbox[1], bbox[2]:bbox[3], :]
-    crop_fname = "{}_{}.jpeg".format(img_no_ext, i)
+    crop_fname = "{}_{}.png".format(img_no_ext, i)
     crop_absname = os.path.join(crops_dir, crop_fname)
 
     if not os.path.exists(crop_absname):
       cv2.imwrite(crop_absname, img_crop)
 
     label = detect_traffic_light(img_crop, img_in_memory=True)
+    print(label)
     print(color_labels[label])
     font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -226,7 +259,7 @@ def process_dataset():
   ensure_dir_created(crops_path)
   ensure_dir_created(labels_path)
 
-  imgs = sorted(glob.glob("{}/*.jpeg".format(imgs_path)))
+  imgs = sorted(glob.glob("{}/*.png".format(imgs_path)))
 
   for img_file in imgs:
     img_split = os.path.split(img_file)[-1]
@@ -235,6 +268,9 @@ def process_dataset():
 
     print(img_file)
     print(xml_file)
+
+    if not os.path.exists(xml_file):
+      continue
 
     extract_crops(img_file, xml_file, crops_path, labels_path)
 

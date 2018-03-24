@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import rospy
-
+import time
 import os
 
 class TrafficLightDetector(object):
@@ -13,7 +13,9 @@ class TrafficLightDetector(object):
 
     # set up tensorflow graph
     self.inference_graph = tf.Graph()
-    config = tf.ConfigProto(allow_soft_placement=True)
+    config = tf.ConfigProto(allow_soft_placement=True,
+                            device_count={'GPU': 0}
+                            )
 
     with self.inference_graph.as_default():
       od_graph_def = tf.GraphDef()
@@ -23,6 +25,7 @@ class TrafficLightDetector(object):
         tf.import_graph_def(od_graph_def, name='')
 
       self.sess = tf.Session(config=config, graph=self.inference_graph)
+
       self.sess.run(tf.initialize_all_variables())
 
       # get the detection tensors from the model
@@ -41,15 +44,19 @@ class TrafficLightDetector(object):
     expanded_image = np.array(np.expand_dims(image, 0))
     height, width = image.shape[:2]
 
+    start = time.time()
     (boxes, scores, classes, num_detections) = self.sess.run([
         self.boxes, self.scores, self.classes, self.num_detections],
         feed_dict={self.image_tensor:expanded_image.astype(np.uint8)})
+    end = time.time()
+    rospy.logerr("Inference run time {:.2f} ms".format((end - start) * 1000))
 
     # batch size is 1, so remove the single-dimensional entry from the shape
     boxes = np.squeeze(boxes)
     scores = np.squeeze(scores)
 
     detections = []
+    scores_final = []
 
     for index in range(len(scores)):
       if scores[index] > self.thresh:
@@ -61,5 +68,6 @@ class TrafficLightDetector(object):
         # keep only large detections with aspect ratio > 1.5
         if det_w > 25 and det_h > 25 and 1.0/det_w*det_h > 1.5:
           detections.append([x1, y1, x2, y2])
+          scores_final.append(scores[index])
 
-    return detections
+    return detections, scores_final
