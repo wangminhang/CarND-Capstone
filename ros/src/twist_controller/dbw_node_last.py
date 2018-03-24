@@ -6,7 +6,7 @@ from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
 from geometry_msgs.msg import TwistStamped
 import math
 
-from twist_controller_last import Controller
+from twist_controller import Controller
 
 '''
 You can build this node only after you have built (or partially built) the `waypoint_updater` node.
@@ -68,7 +68,6 @@ class DBWNode(object):
             steer_ratio=steer_ratio,
             max_lat_accel=max_lat_accel,
             wheel_radius=wheel_radius,
-            brake_deadband=brake_deadband
         )
 
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb)
@@ -90,7 +89,7 @@ class DBWNode(object):
                 )
                 # Only publish if dbw (Drive By Wire) is enabled.
                 if self.dbw_enabled:
-                    # rospy.logerr("brake %s", (throttle, brake, steering))
+                    rospy.logerr("brake %s", (throttle, brake, steering))
                     self.publish(throttle, brake, steering)
             rate.sleep()
 

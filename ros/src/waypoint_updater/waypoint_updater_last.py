@@ -49,9 +49,9 @@ class WaypointUpdater(object):
     def __init__(self):
         rospy.init_node('waypoint_updater')
 
-        # # For mocking the traffic light status.
-        # rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_light_mock_cb, queue_size=1)
-        # self.mock_traffic_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
+        # For mocking the traffic light status.
+        rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_light_mock_cb, queue_size=1)
+        self.mock_traffic_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
 
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
@@ -122,7 +122,7 @@ class WaypointUpdater(object):
         # limit publishing rate (uses rate.sleep later)
         rate = rospy.Rate(10)
         while not rospy.is_shutdown():
-            # rospy.logwarn("loop pose: %s", self.pose)
+            rospy.logwarn("loop pose: %s", self.pose)
 
             # TODO: Should we move the pose_cb logic back in here? It seems to
             # Run on it's own thread and we NEED to have something like
@@ -130,7 +130,7 @@ class WaypointUpdater(object):
             rate.sleep()
             # Make sure we've got valid data before publishing
             if not self.pose or not self.base_waypoints or not self.next_traffic_wp_idx:
-                # rospy.logwarn("waiting for all data..")
+                rospy.logwarn("waiting for all data..")
                 continue
 
             closest_wp_idx, closest_wp_dist = self.get_closest_waypoint(
@@ -144,7 +144,7 @@ class WaypointUpdater(object):
             base_wp_len = len(self.base_waypoints)
 
             # vel_inc = self.current_velocity / n_waypoints_to_light
-            # rospy.logwarn("---------------:  %s", self.current_velocity)
+            rospy.logwarn("---------------:  %s", self.current_velocity)
             vel = self.current_velocity
             for i in range(LOOKAHEAD_WPS):
                 this_wp_idx = (closest_wp_idx + i) % base_wp_len
@@ -173,14 +173,12 @@ class WaypointUpdater(object):
 
                         vel -= accel_required * time_until_next
                     else:
-                        vel = min(vel + 1, 40)  # TODO: Don't Hardcode.
+                        vel = min(vel + 1, 50)  # TODO: Don't Hardcode.
                 else:
-                    vel = min(vel + 1, 40)  # TODO: Don't Hardcode.
+                    vel = min(vel + 1, 50)  # TODO: Don't Hardcode.
 
                 #rospy.logwarn("vel:  %s", vel)
                 # rospy.logwarn("n_waypoints_to_light:  %s", n_waypoints_to_light)
-
-                # vel = vel * 0.44704
 
                 self.set_waypoint_velocity(self.base_waypoints, next_wp_idx,
                                            vel)
@@ -189,19 +187,19 @@ class WaypointUpdater(object):
             # publish the waypoints
             self.final_waypoints_pub.publish(lane)
 
-    # def traffic_light_mock_cb(self, msg):
-    #     if self.base_waypoints:
-    #         i, dist = self.get_closest_waypoint(self.pose, msg.lights)
-    #         #rospy.logwarn("nearest tl: %s", msg.lights[i].pose.pose)
-    #
-    #         # TODO: May need to get the traffic line and not just the wp closest to the light?
-    #         # config_string = rospy.get_param("/traffic_light_config")
-    #         # self.config = yaml.load(config_string)
-    #
-    #         nearest_wp_idx, dist = self.get_closest_waypoint(msg.lights[i].pose.pose, self.base_waypoints)
-    #
-    #         #rospy.logwarn("nearest tl: %s", nearest_wp_idx)
-    #         self.mock_traffic_light_pub.publish(nearest_wp_idx)
+    def traffic_light_mock_cb(self, msg):
+        if self.base_waypoints:
+            i, dist = self.get_closest_waypoint(self.pose, msg.lights)
+            #rospy.logwarn("nearest tl: %s", msg.lights[i].pose.pose)
+
+            # TODO: May need to get the traffic line and not just the wp closest to the light?
+            # config_string = rospy.get_param("/traffic_light_config")
+            # self.config = yaml.load(config_string)
+
+            nearest_wp_idx, dist = self.get_closest_waypoint(msg.lights[i].pose.pose, self.base_waypoints)
+
+            #rospy.logwarn("nearest tl: %s", nearest_wp_idx)
+            self.mock_traffic_light_pub.publish(nearest_wp_idx)
 
     def current_velocity_cb(self, msg):
         # rospy.logerr(msg)
@@ -213,7 +211,7 @@ class WaypointUpdater(object):
 
 
     def waypoints_cb(self, msg):
-        # rospy.logwarn("waypoints_cb N:  %s", len(msg.waypoints))
+        rospy.logwarn("waypoints_cb N:  %s", len(msg.waypoints))
         # NOTE: This should only happen once.
         self.base_waypoints = msg.waypoints
 
