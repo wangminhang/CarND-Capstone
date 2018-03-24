@@ -7,7 +7,7 @@ import os
 class TrafficLightDetector(object):
   def __init__(self, thresh):
     self.thresh = thresh
-    inference_graph_path = 'light_classification/model/frozen_inference_graph.pb'
+    inference_graph_path = 'light_classification/model/frozen_inference_graph_tf13.pb'
 
     # print(os.path.realpath(__file__))
 
