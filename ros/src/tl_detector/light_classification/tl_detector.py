@@ -35,7 +35,7 @@ class TrafficLightDetector(object):
   def get_detection(self, image):
     """
     :param image: 
-    :return: List containing detected boxes
+    :return: List of boxes
     """
 
     expanded_image = np.array(np.expand_dims(image, 0))
