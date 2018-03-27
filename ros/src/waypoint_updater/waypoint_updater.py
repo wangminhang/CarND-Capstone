@@ -95,21 +95,19 @@ class WaypointUpdater(object):
         return yaw
 
     def get_closest_waypoint(self, pose):
-        x = pose.pose.position.x
-        y = pose.pose.position.y
-        z = pose.pose.position.z
-        a = (x, y, z)
-
-        d = lambda a, b: math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
-
         closest_wp_idx = None
         closest_wp_dist = 10 ** 10  # some really big distance.
+        yaw = self.get_yaw(pose.pose.orientation)
 
-        for i, wp in enumerate(self.base_waypoints):
-            b = (wp.pose.pose.position.x, wp.pose.pose.position.y, wp.pose.pose.position.z)
-            dist = d(a, b)
-
-            if dist < closest_wp_dist:
+        # Compute the waypoints ahead of the current_pose
+        base_wp_len = len(self.base_waypoints)
+        for i in range(base_wp_len):
+            wp_pos = self.base_waypoints[i].pose.pose.position
+            wp_x, wp_y, _ = self.convert_coord(
+                pose.pose.position.x, pose.pose.position.y, yaw,
+                wp_pos.x, wp_pos.y)
+            dist = math.sqrt((wp_x ** 2) + (wp_y ** 2))
+            if wp_x > 0 and dist < closest_wp_dist:
                 closest_wp_dist = dist
                 closest_wp_idx = i
 
@@ -128,8 +126,10 @@ class WaypointUpdater(object):
 
             # get index of closest wp
             index = self.get_closest_waypoint(self.pose)
-            index_end = min(index + LOOKAHEAD_WPS, len(self.base_waypoints))
-            self.current_wp_idx = index
+
+            rospy.logerr('closest wp idx: {}'.format(index))
+            rospy.logwarn('car pose x: {}; closest wp x: {}'.format(self.pose.pose.position.x,
+                                                                    self.base_waypoints[index].pose.pose.position.x))
 
             # check if index wp is in front of the car
             ref_yaw = self.get_yaw(self.pose.pose.orientation)
@@ -142,19 +142,20 @@ class WaypointUpdater(object):
 
             new_x, new_y, angle = self.convert_coord(ref_x, ref_y, ref_yaw, wp_x, wp_y)
 
-            if new_x < 0 or new_y < 0:
-                index += 1
+            if new_x < 0 or new_y < 0 or angle > math.pi / 4:
+                index = (index + 1) % len(self.base_waypoints)
 
-            # check orientation
-            if angle > math.pi / 4:
-                index += 1
-                if index > len(self.base_waypoints):
-                    index = 0
+            self.current_wp_idx = index
+            index_end = (index + LOOKAHEAD_WPS) % len(self.base_waypoints)
 
             msg_pub = Lane()
             msg_pub.header.frame_id = 'waypoints_ahead'
             msg_pub.header.stamp = rospy.Time.now()
-            msg_pub.waypoints = self.base_waypoints[index:index_end]
+
+            if index_end < index:
+                msg_pub.waypoints = self.base_waypoints[index:] + self.base_waypoints[:index_end]
+            else:
+                msg_pub.waypoints = self.base_waypoints[index:index_end]
 
             self.final_waypoints_pub.publish(msg_pub)
 
@@ -198,11 +199,24 @@ class WaypointUpdater(object):
         if current_velocity <= 0.: current_velocity = MIN_VEL
 
         if self.next_traffic_wp_idx < 0:
-            self.next_traffic_wp_idx = min(len(self.base_waypoints), self.current_wp_idx + LOOKAHEAD_WPS)
+            # self.next_traffic_wp_idx = min(len(self.base_waypoints), self.current_wp_idx + LOOKAHEAD_WPS)
+            self.next_traffic_wp_idx = (self.current_wp_idx + LOOKAHEAD_WPS) % len(self.base_waypoints)
+
+            if self.next_traffic_wp_idx < self.current_wp_idx:
+                distance = self.distance(self.base_waypoints, self.current_wp_idx, len(self.base_waypoints)-1) +\
+                    self.distance(self.base_waypoints, 0, self.next_traffic_wp_idx)
+            else:
+                distance = self.distance(self.base_waypoints, self.current_wp_idx, self.next_traffic_wp_idx)
+
             should_brake = False
-            distance = self.distance(self.base_waypoints, self.current_wp_idx, self.next_traffic_wp_idx)
         else:
-            distance = self.distance(self.base_waypoints, self.current_wp_idx, self.next_traffic_wp_idx)
+            # distance = self.distance(self.base_waypoints, self.current_wp_idx, self.next_traffic_wp_idx)
+
+            if self.next_traffic_wp_idx < self.current_wp_idx:
+                distance = self.distance(self.base_waypoints, self.current_wp_idx, len(self.base_waypoints) - 1) + \
+                       self.distance(self.base_waypoints, 0, self.next_traffic_wp_idx)
+            else:
+                distance = self.distance(self.base_waypoints, self.current_wp_idx, self.next_traffic_wp_idx)
 
             # check time to brake with decel_limit
             if distance / current_velocity > abs(current_velocity / (self.decel_limit + .5)) and current_velocity > MIN_VEL:
@@ -219,10 +233,25 @@ class WaypointUpdater(object):
 
         linear_accel = local_max_vel * self.accel_limit if not should_brake else current_velocity * abs(self.decel_limit)
 
+        if self.next_traffic_wp_idx < self.current_wp_idx:
+            self.update_waypoints(self.current_wp_idx, len(self.base_waypoints),
+                                  current_velocity, distance, linear_accel, should_brake)
+            self.update_waypoints(0, self.next_traffic_wp_idx+1,
+                                  current_velocity, distance, linear_accel, should_brake)
+        else:
+            self.update_waypoints(self.current_wp_idx, self.next_traffic_wp_idx+1,
+                                  current_velocity, distance, linear_accel, should_brake)
+
+        if should_brake:
+            rospy.logwarn("Red Light Detected")
+        else:
+            rospy.logwarn("Green Light Detected")
+
+    def update_waypoints(self, start_idx, end_idx, current_velocity, distance, linear_accel, should_brake):
         # update waypoints
-        for i in range(self.current_wp_idx, self.next_traffic_wp_idx+1):
+        for i in range(start_idx, end_idx):
             # compute partial velocity until stop
-            delta_dist = self.distance(self.base_waypoints, self.current_wp_idx, i)
+            delta_dist = self.distance(self.base_waypoints, start_idx, i)
             delta_vel = float(int(delta_dist / distance + 1)) * linear_accel
 
             if should_brake:
@@ -233,11 +262,6 @@ class WaypointUpdater(object):
                 vel = max(min(current_velocity + delta_vel, self.max_vel), MIN_VEL)
 
             self.set_waypoint_velocity(self.base_waypoints, i, vel)
-
-        if should_brake:
-            rospy.logwarn("Red Light Detected")
-        else:
-            rospy.logwarn("Green Light Detected")
 
     def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later
