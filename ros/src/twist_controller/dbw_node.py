@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 
 import rospy
-from std_msgs.msg import Bool
-from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
+from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd
 from geometry_msgs.msg import TwistStamped
-import math
+from std_msgs.msg import Bool
 
-from twist_controller_last import Controller
+from twist_controller import Controller
 
 '''
 You can build this node only after you have built (or partially built) the `waypoint_updater` node.

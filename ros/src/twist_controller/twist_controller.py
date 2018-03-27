@@ -1,69 +1,80 @@
 import rospy
-import time
-
+from pid import PID
 from yaw_controller import YawController
 from lowpass import LowPassFilter
 
 GAS_DENSITY = 2.858
 ONE_MPH = 0.44704
-MAX_VEL = 10
+TEMP_STEER = -8
 
 
 class Controller(object):
     def __init__(self, *args, **kwargs):
 
         self.accel_limit = kwargs['accel_limit']
-        self.last_t = None
-
-        self.yaw_controller = YawController(kwargs['wheel_base'], kwargs['steer_ratio'],
-                                         ONE_MPH, kwargs['max_lat_accel'],
-                                         kwargs['max_steer_angle'])
-
+        self.throttle_PID = PID(30, 3, 1) # TODO: optimize these weights on P, I, and D.
+        self.last_stamp = None # ros timestamp of the last time control() was called.
+        self.yaw_controller = YawController(kwargs['wheel_base'],
+                                            kwargs['steer_ratio'],
+                                            ONE_MPH,
+                                            kwargs['max_lat_accel'],
+                                            kwargs['max_steer_angle'])
         self.filter = LowPassFilter(0.2, 0.1)
 
-        # TODO: Implement
-        pass
+        self.vehicle_mass = kwargs['vehicle_mass'] + kwargs['fuel_capacity'] * GAS_DENSITY
+        self.wheel_radius = kwargs['wheel_radius']
+        self.decel_limit = kwargs['decel_limit']
+        self.brake_deadband = kwargs['brake_deadband']
 
-    def control(self, target_linear_vel, target_angular_vel, curr_vel, dbw_enabled):
+        self.max_accel_torque = self.vehicle_mass * self.accel_limit * self.wheel_radius
 
-        # Calculate the acceleration needed to go from the current velocity to
-        # the proposed x velocity in the amount of time since the last update.
+    def control(self, target_x_vel, target_ang_vel, curr_x_vel, dbw_enabled):
+        # TODO: Remove these hardcoded variables and use the parameters.
+        #target_x_vel = SPEED_LIMIT_MPS
+        #target_ang_vel = TEMP_STEER
 
-        if self.last_t is None or not dbw_enabled:
-            self.last_t = rospy.get_time()
+        if self.last_stamp is None or not dbw_enabled:
+            self.last_stamp = rospy.get_time() # On the first pass, just initialize last_stamp.
+            # Reset the PID Controllers just in case.
+            self.throttle_PID.reset()
+            return 0.0, 0.0, 0.0
 
-        rospy.logerr('{} {}'.format(target_linear_vel.x, curr_vel.x))
+        # Note: It might be better to use the timestamps in the messages for better accuracy?
+        curr_time = rospy.get_time()
+        time_delta = curr_time - self.last_stamp
+        self.last_stamp = curr_time
 
-        dt = rospy.get_time() - self.last_t
-        dv = MAX_VEL * ONE_MPH - curr_vel.x
+        # Note: vel_err is positive when car is too slow and negative when going too fast.
+        vel_err = target_x_vel - curr_x_vel
+        T = self.throttle_PID.step(vel_err, time_delta)
 
-        throttle = dv / dt
-        throttle = max(0., min(1., throttle))
-        brake = 0.
+        # adjust throttle at low velocity
+        if target_x_vel < 3 and curr_x_vel < 4:
+          T = vel_err / time_delta
+          T = min(self.accel_limit, T) if T >= 0. else max(self.decel_limit, T)
 
-        if dv < 0:
-            brake = -5.0 * dv
-            brake = max(1., brake)
-            # throttle = 0.
+          if abs(T) < self.brake_deadband:
+            T = 0.
 
-        # time_delta = curr_time - curr_vel_last
-        # vel_delta = prop_x_vel - curr_vel
-        # accel = vel_delta / time_delta.to_sec()
+          T = self.vehicle_mass * T * self.wheel_radius
 
-        # TODO: This is the max acceleration, but how do we know how much
-        # throttle to use, PID controller?
-        # max_accel = min(accel, self.accel_limit)
-        # rospy.logerr('{} {}'.format(vel_delta, time_delta.to_sec()))
+        # adjust throttle and brake when speed is zero
+        if target_x_vel < 1 and curr_x_vel < 1:
+            throttle = 0.
+            brake = 1.
+        else:
+            # compute throttle and brake
+            throttle = T / self.max_accel_torque if T > 0. else 0
+            brake = abs(T) if T <= 0. else 0.
 
-        #TODO: How do we convert max_steer_angle to angular velocity?
-        # I assume max_steer_angle is the steering wheel angle and not angle of the wheels?
+        steer = self.yaw_controller.get_steering(target_x_vel,
+                                                 target_ang_vel,
+                                                 curr_x_vel)
 
-        # Return throttle, brake, steer
-        # TODO: These are just hardcoded for now until we know how to set the right values.
-        # return 1., 0., 0.
-        steer = self.yaw_controller.get_steering(target_linear_vel.x, target_angular_vel.z, curr_vel.x)
-        steer = self.filter.filt(steer)
+        # TODO: Do we need to use the lowpass filter, why?
+        # steer = self.filter.filt(steer)
 
-        self.last_t = time.time()
+        # # Update the last time.
+        # self.last_stamp = rospy.get_time()
 
         return throttle, brake, steer
