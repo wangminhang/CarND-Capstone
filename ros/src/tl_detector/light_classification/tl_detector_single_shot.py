@@ -4,10 +4,10 @@ import rospy
 import time
 import os
 
-class TrafficLightDetector(object):
+class TrafficLightDetectorSingleShot(object):
   def __init__(self, thresh):
     self.thresh = thresh
-    inference_graph_path = 'light_classification/model/frozen_inference_graph_tf13.pb'
+    inference_graph_path = 'light_classification/model/frozen_inference_graph_single_shot.pb'
 
     # print(os.path.realpath(__file__))
 
@@ -36,7 +36,7 @@ class TrafficLightDetector(object):
       self.classes = self.inference_graph.get_tensor_by_name('detection_classes:0')
       self.num_detections = self.inference_graph.get_tensor_by_name('num_detections:0')
 
-  def get_detection(self, image):
+  def get_tl_type(self, image):
     """
     :param image: 
     :return: List of boxes
@@ -50,14 +50,15 @@ class TrafficLightDetector(object):
         self.boxes, self.scores, self.classes, self.num_detections],
         feed_dict={self.image_tensor:expanded_image.astype(np.uint8)})
     end = time.time()
-    rospy.logerr("Inference run time {:.2f} ms".format((end - start) * 1000))
 
     # batch size is 1, so remove the single-dimensional entry from the shape
     boxes = np.squeeze(boxes)
     scores = np.squeeze(scores)
+    classes = np.squeeze(classes)
 
     detections = []
     scores_final = []
+    classes_final = []
 
     for index in range(len(scores)):
       if scores[index] > self.thresh:
@@ -70,5 +71,14 @@ class TrafficLightDetector(object):
         if det_w > 25 and det_h > 25 and 1.0/det_w*det_h > 1.5:
           detections.append([x1, y1, x2, y2])
           scores_final.append(scores[index])
+          classes_final.append(classes[index])
 
-    return detections, scores_final
+    if not detections:
+      return 4, [], []
+
+    top = np.argmax(scores_final)
+    detected_class = classes_final[top]
+
+
+
+    return detected_class - 1, detections[top], scores_final[top]
