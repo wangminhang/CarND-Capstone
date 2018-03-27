@@ -8,10 +8,13 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from light_classification.tl_classifier import TLClassifier
 from light_classification.tl_detector import TrafficLightDetector
+from light_classification.model.demo import visualize_norm, ensure_anno_dirs_created, DATA_DIR
+
 import tf
 import cv2
 import yaml
 import math
+import  os
 
 import numpy as np
 
@@ -57,6 +60,13 @@ class TLDetector(object):
 
         # warm up tf
         self.light_detector.get_detection(np.zeros((600, 800, 3)).astype(np.uint8))
+
+        self.on_site = True
+
+        if self.on_site:
+            ensure_anno_dirs_created()
+            self.frame_id = 0
+
 
         rospy.spin()
 
@@ -160,10 +170,23 @@ class TLDetector(object):
         cv_image = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8"), cv2.COLOR_BGR2RGB)
 
         # get tl detections
-        detections = self.light_detector.get_detection(cv_image)
+        detections, scores = self.light_detector.get_detection(cv_image)
 
-        #Get classification
+        # Get classification
         tl_type = self.light_classifier.get_classification(cv_image, detections)
+
+        if self.on_site:
+            img_path = os.path.join(DATA_DIR, "{}.png".format(self.frame_id))
+            rospy.logwarn("Saving images {}".format(img_path))
+            rospy.logwarn("Detections")
+            rospy.logwarn(detections)
+            rospy.logwarn(scores)
+
+            cv2.imwrite(img_path, cv_image[:, :, ::-1])
+            visualize_norm(cv_image[:, :, ::-1], [scores], [detections], img_path)
+            self.frame_id += 1
+
+
 
         # state = 'UNKNOWN'
         #
