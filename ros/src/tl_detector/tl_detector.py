@@ -15,6 +15,7 @@ import cv2
 import yaml
 import math
 import  os
+from threading import Lock
 
 import numpy as np
 
@@ -40,7 +41,7 @@ class TLDetector(object):
         rely on the position of the light and the camera image to predict it.
         '''
         sub3 = rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_cb)
-        sub6 = rospy.Subscriber('/image_color', Image, self.image_cb)
+        sub6 = rospy.Subscriber('/image_color', Image, self.image_cb, queue_size=1, buff_size=50 * 1024 * 1024)
 
         config_string = rospy.get_param("/traffic_light_config")
         self.config = yaml.load(config_string)
@@ -61,9 +62,10 @@ class TLDetector(object):
         # warm up tf
         self.light_detector.get_detection(np.zeros((600, 800, 3)).astype(np.uint8))
 
-        self.on_site = True
+        self.log_images = True
 
-        if self.on_site:
+        if self.log_images:
+            self.lock = Lock()
             ensure_anno_dirs_created()
             self.frame_id = 0
 
@@ -90,6 +92,15 @@ class TLDetector(object):
         self.has_image = True
         self.camera_image = msg
         light_wp, state = self.process_traffic_lights()
+
+        if self.log_images:
+            self.lock.acquire()
+            cv_image = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8"), cv2.COLOR_BGR2RGB)
+            img_path = os.path.join(DATA_DIR, "{}.png".format(self.frame_id))
+            rospy.logwarn("Saving images {}".format(img_path))
+            cv2.imwrite(img_path, cv_image[:, :, ::-1])
+            self.frame_id += 1
+            self.lock.release()
 
         '''
         Publish upcoming red lights at camera frequency.
@@ -174,19 +185,6 @@ class TLDetector(object):
 
         # Get classification
         tl_type = self.light_classifier.get_classification(cv_image, detections)
-
-        if self.on_site:
-            img_path = os.path.join(DATA_DIR, "{}.png".format(self.frame_id))
-            rospy.logwarn("Saving images {}".format(img_path))
-            rospy.logwarn("Detections")
-            rospy.logwarn(detections)
-            rospy.logwarn(scores)
-
-            cv2.imwrite(img_path, cv_image[:, :, ::-1])
-            visualize_norm(cv_image[:, :, ::-1], [scores], [detections], img_path)
-            self.frame_id += 1
-
-
 
         # state = 'UNKNOWN'
         #
