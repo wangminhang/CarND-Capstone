@@ -8,6 +8,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from light_classification.tl_classifier import TLClassifier
 from light_classification.tl_detector import TrafficLightDetector
+from light_classification.tl_detector_single_shot import TrafficLightDetectorSingleShot
 from light_classification.model.demo import visualize_norm, ensure_anno_dirs_created, DATA_DIR
 
 import tf
@@ -15,6 +16,7 @@ import cv2
 import yaml
 import math
 import  os
+from threading import Lock
 
 import numpy as np
 
@@ -40,7 +42,7 @@ class TLDetector(object):
         rely on the position of the light and the camera image to predict it.
         '''
         sub3 = rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_cb)
-        sub6 = rospy.Subscriber('/image_color', Image, self.image_cb)
+        sub6 = rospy.Subscriber('/image_color', Image, self.image_cb, queue_size=1, buff_size=50 * 1024 * 1024)
 
         config_string = rospy.get_param("/traffic_light_config")
         self.config = yaml.load(config_string)
@@ -48,8 +50,19 @@ class TLDetector(object):
         self.upcoming_red_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
 
         self.bridge = CvBridge()
-        self.light_classifier = TLClassifier()
-        self.light_detector = TrafficLightDetector(0.7)
+
+        self.on_site = rospy.get_param('/tl_detector/on_site', False)
+        rospy.logwarn("Setup is on site: {}".format(self.on_site))
+
+        if not self.on_site:
+            self.light_classifier = TLClassifier()
+            self.light_detector = TrafficLightDetector(0.7)
+            self.light_detector.get_detection(np.zeros((600, 800, 3)).astype(np.uint8))
+
+        else:
+            # TODO single shot detection and classification
+            self.light_detector_single_shot = TrafficLightDetectorSingleShot(0.3)
+            self.light_detector_single_shot.get_tl_type(np.zeros((1096, 1368, 3)).astype(np.uint8))
 
         self.listener = tf.TransformListener()
 
@@ -58,12 +71,14 @@ class TLDetector(object):
         self.last_wp = -1
         self.state_count = 0
 
-        # warm up tf
-        self.light_detector.get_detection(np.zeros((600, 800, 3)).astype(np.uint8))
+        self.log_images = False
 
-        self.on_site = True
+        self.class_map = ["red", "yellow", "green", "unused", "unk"]
 
-        if self.on_site:
+
+
+        if self.log_images:
+            self.lock = Lock()
             ensure_anno_dirs_created()
             self.frame_id = 0
 
@@ -90,6 +105,15 @@ class TLDetector(object):
         self.has_image = True
         self.camera_image = msg
         light_wp, state = self.process_traffic_lights()
+
+        if self.log_images:
+            self.lock.acquire()
+            cv_image = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8"), cv2.COLOR_BGR2RGB)
+            img_path = os.path.join(DATA_DIR, "{}.png".format(self.frame_id))
+            rospy.logwarn("Saving images {}".format(img_path))
+            cv2.imwrite(img_path, cv_image[:, :, ::-1])
+            self.frame_id += 1
+            self.lock.release()
 
         '''
         Publish upcoming red lights at camera frequency.
@@ -150,20 +174,11 @@ class TLDetector(object):
 
         return closest_wp
 
-    def get_light_state(self, light):
-        """Determines the current color of the traffic light
-
-        Args:
-            light (TrafficLight): light to classify
-
-        Returns:
-            int: ID of traffic light color (specified in styx_msgs/TrafficLight)
-
-        """
+    def _get_light_state_simulator(self, light):
         if self.light_detector is None or self.light_classifier is None:
             return TrafficLight.RED
 
-        if(not self.has_image):
+        if (not self.has_image):
             self.prev_light_loc = None
             return False
 
@@ -175,33 +190,45 @@ class TLDetector(object):
         # Get classification
         tl_type = self.light_classifier.get_classification(cv_image, detections)
 
-        if self.on_site:
-            img_path = os.path.join(DATA_DIR, "{}.png".format(self.frame_id))
-            rospy.logwarn("Saving images {}".format(img_path))
-            rospy.logwarn("Detections")
-            rospy.logwarn(detections)
-            rospy.logwarn(scores)
+        return tl_type
 
-            cv2.imwrite(img_path, cv_image[:, :, ::-1])
-            visualize_norm(cv_image[:, :, ::-1], [scores], [detections], img_path)
-            self.frame_id += 1
+    def _get_light_state_on_site(self, light):
+        if self.light_detector_single_shot is None:
+            return TrafficLight.RED
 
+        if (not self.has_image):
+            self.prev_light_loc = None
+            return False
 
+        cv_image = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8"), cv2.COLOR_BGR2RGB)
 
-        # state = 'UNKNOWN'
-        #
-        # if tl_type == 0:
-        #     state = 'RED'
-        # elif tl_type == 1:
-        #     state = 'YELLOW'
-        # elif tl_type == 2:
-        #     state = 'GREEN'
-        # elif tl_type == 4:
-        #     state = 'UNKNOWN'
-        #
-        # rospy.logerr('TL STATE: {}'.format(state))
+        # get tl detections
+
+        tl_type, det, score = self.light_detector_single_shot.get_tl_type(cv_image)
+        rospy.logwarn("Traffic light {} {} {} {}".format(tl_type, self.class_map[int(tl_type)],  det, score))
 
         return tl_type
+
+
+    def get_light_state(self, light):
+        """Determines the current color of the traffic light
+
+        Args:
+            light (TrafficLight): light to classify
+
+        Returns:
+            int: ID of traffic light color (specified in styx_msgs/TrafficLight)
+
+        """
+
+        if not self.on_site:
+            return self._get_light_state_simulator(light)
+
+        return self._get_light_state_on_site(light)
+
+
+
+
 
     def process_traffic_lights(self):
         """Finds closest visible traffic light, if one exists, and determines its
