@@ -2,14 +2,11 @@ import tensorflow as tf
 import numpy as np
 import rospy
 import time
-import os
 
 class TrafficLightDetector(object):
   def __init__(self, thresh):
     self.thresh = thresh
     inference_graph_path = 'light_classification/model/frozen_inference_graph_tf13.pb'
-
-    # print(os.path.realpath(__file__))
 
     # set up tensorflow graph
     self.inference_graph = tf.Graph()
