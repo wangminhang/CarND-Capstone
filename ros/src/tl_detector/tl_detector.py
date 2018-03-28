@@ -9,14 +9,11 @@ from cv_bridge import CvBridge, CvBridgeError
 from light_classification.tl_classifier import TLClassifier
 from light_classification.tl_detector import TrafficLightDetector
 from light_classification.tl_detector_single_shot import TrafficLightDetectorSingleShot
-from light_classification.model.demo import visualize_norm, ensure_anno_dirs_created, DATA_DIR
 
 import tf
 import cv2
 import yaml
 import math
-import  os
-from threading import Lock
 
 import numpy as np
 
@@ -71,17 +68,7 @@ class TLDetector(object):
         self.last_wp = -1
         self.state_count = 0
 
-        self.log_images = False
-
         self.class_map = ["red", "yellow", "green", "unused", "unk"]
-
-
-
-        if self.log_images:
-            self.lock = Lock()
-            ensure_anno_dirs_created()
-            self.frame_id = 0
-
 
         rospy.spin()
 
@@ -105,15 +92,6 @@ class TLDetector(object):
         self.has_image = True
         self.camera_image = msg
         light_wp, state = self.process_traffic_lights()
-
-        if self.log_images:
-            self.lock.acquire()
-            cv_image = cv2.cvtColor(self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8"), cv2.COLOR_BGR2RGB)
-            img_path = os.path.join(DATA_DIR, "{}.png".format(self.frame_id))
-            rospy.logwarn("Saving images {}".format(img_path))
-            cv2.imwrite(img_path, cv_image[:, :, ::-1])
-            self.frame_id += 1
-            self.lock.release()
 
         '''
         Publish upcoming red lights at camera frequency.

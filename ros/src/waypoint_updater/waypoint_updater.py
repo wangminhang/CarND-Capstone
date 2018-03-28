@@ -8,8 +8,6 @@ from std_msgs.msg import Int32, Header
 import os
 
 import math
-import copy
-import numpy as np
 
 '''
 This node will publish waypoints from the car's current position to some `x` distance ahead.
@@ -76,8 +74,6 @@ class WaypointUpdater(object):
         self.accel_limit = rospy.get_param('~accel_limit', 1.)
 
         self.max_vel = rospy.get_param('/waypoint_loader/velocity', 40.) * ONE_KPH
-
-        # rospy.logerr('{} {}'.format(MIN_VEL, self.max_vel))
 
         self.loop()
 
@@ -170,7 +166,6 @@ class WaypointUpdater(object):
         self.pose = msg
 
     def waypoints_cb(self, msg):
-        # rospy.logwarn("waypoints_cb N:  %s", len(msg.waypoints))
         # NOTE: This should only happen once.
         waypoints = msg.waypoints
 
@@ -180,6 +175,7 @@ class WaypointUpdater(object):
                 self.set_waypoint_velocity(waypoints, i, self.max_vel)
 
         self.base_waypoints = waypoints
+        rospy.logwarn("Successfully loaded N waypoints {}".format(len(msg.waypoints)))
 
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
