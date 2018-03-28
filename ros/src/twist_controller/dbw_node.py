@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 
 import rospy
-from std_msgs.msg import Bool
-from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
+from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd
 from geometry_msgs.msg import TwistStamped
-import math
+from std_msgs.msg import Bool
 
 from twist_controller import Controller
 
@@ -68,11 +67,12 @@ class DBWNode(object):
             steer_ratio=steer_ratio,
             max_lat_accel=max_lat_accel,
             wheel_radius=wheel_radius,
+            brake_deadband=brake_deadband
         )
 
-        rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb)
+        rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb, queue_size=1)
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb)
-        rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb)
+        rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb, queue_size=1)
 
         self.loop()
 
@@ -89,7 +89,7 @@ class DBWNode(object):
                 )
                 # Only publish if dbw (Drive By Wire) is enabled.
                 if self.dbw_enabled:
-                    rospy.logerr("brake %s", (throttle, brake, steering))
+                    # rospy.logerr("brake %s", (throttle, brake, steering))
                     self.publish(throttle, brake, steering)
             rate.sleep()
 

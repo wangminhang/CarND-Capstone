@@ -5,7 +5,6 @@ from lowpass import LowPassFilter
 
 GAS_DENSITY = 2.858
 ONE_MPH = 0.44704
-SPEED_LIMIT_MPS = 40.0 * ONE_MPH # Assume 40 mph is speed limit for now.
 TEMP_STEER = -8
 
 
@@ -13,7 +12,7 @@ class Controller(object):
     def __init__(self, *args, **kwargs):
 
         self.accel_limit = kwargs['accel_limit']
-        self.throttle_PID = PID(200, 0, 0) # TODO: optimize these weights on P, I, and D.
+        self.throttle_PID = PID(30, 3, 1) # TODO: optimize these weights on P, I, and D.
         self.last_stamp = None # ros timestamp of the last time control() was called.
         self.yaw_controller = YawController(kwargs['wheel_base'],
                                             kwargs['steer_ratio'],
@@ -25,8 +24,9 @@ class Controller(object):
         self.vehicle_mass = kwargs['vehicle_mass'] + kwargs['fuel_capacity'] * GAS_DENSITY
         self.wheel_radius = kwargs['wheel_radius']
         self.decel_limit = kwargs['decel_limit']
+        self.brake_deadband = kwargs['brake_deadband']
 
-
+        self.max_accel_torque = self.vehicle_mass * self.accel_limit * self.wheel_radius
 
     def control(self, target_x_vel, target_ang_vel, curr_x_vel, dbw_enabled):
         # TODO: Remove these hardcoded variables and use the parameters.
@@ -40,45 +40,41 @@ class Controller(object):
             return 0.0, 0.0, 0.0
 
         # Note: It might be better to use the timestamps in the messages for better accuracy?
-        time_delta = rospy.get_time() - self.last_stamp
+        curr_time = rospy.get_time()
+        time_delta = curr_time - self.last_stamp
+        self.last_stamp = curr_time
 
         # Note: vel_err is positive when car is too slow and negative when going too fast.
         vel_err = target_x_vel - curr_x_vel
-        vel_err_adj = max(self.decel_limit * time_delta, min(target_x_vel - curr_x_vel, self.accel_limit * time_delta))
-        # rospy.logerr("vel_err %s", vel_err)
-        throttle = self.throttle_PID.step(vel_err_adj, time_delta)
-        # rospy.logerr("throttle %s", throttle)
+        T = self.throttle_PID.step(vel_err, time_delta)
 
-        # Make sure the returned throttle is within limits.
-        throttle = max(-1.0, min(1.0, throttle))
-        rospy.logerr("throttle %s", throttle)
-        rospy.logwarn("vel_err, time_delta %s", (target_x_vel,  vel_err, vel_err_adj, time_delta))
+        # adjust throttle at low velocity
+        if target_x_vel < 3 and curr_x_vel < 4:
+          T = vel_err / time_delta
+          T = min(self.accel_limit, T) if T >= 0. else max(self.decel_limit, T)
 
-        # TODO: Do we care about the acceleration and jerk here?
-        if throttle < 0:
-            # Brake values passed to publish should be in units of torque (N*m).
-            # The correct values for brake can be computed using the desired
-            # acceleration, weight of the vehicle, and wheel radius.
-            brake = (-vel_err) * self.vehicle_mass * self.wheel_radius
-            throttle = 0
+          if abs(T) < self.brake_deadband:
+            T = 0.
 
-        # NOTE: Using the current P: 2, I:0, and D:0, the car breaks a bit slowly.
-        # We may want to set independent break and steering, or just multiply by some factor.
-        # Velocity based waypoints may make this less necessary.
+          T = self.vehicle_mass * T * self.wheel_radius
+
+        # adjust throttle and brake when speed is zero
+        if target_x_vel < 1 and curr_x_vel < 1:
+            throttle = 0.
+            brake = 1.
         else:
-            brake = 0
+            # compute throttle and brake
+            throttle = T / self.max_accel_torque if T > 0. else 0
+            brake = abs(T) if T <= 0. else 0.
 
-
-        # Uses the provided yaw_controller, which takes lateral acceleration into
-        # account (the faster you go, the smaller the max angle at the wheels.
         steer = self.yaw_controller.get_steering(target_x_vel,
                                                  target_ang_vel,
                                                  curr_x_vel)
 
         # TODO: Do we need to use the lowpass filter, why?
-        #steer = self.filter.filt(steer)
+        # steer = self.filter.filt(steer)
 
-        # Update the last time.
-        self.last_stamp = rospy.get_time()
+        # # Update the last time.
+        # self.last_stamp = rospy.get_time()
 
         return throttle, brake, steer
