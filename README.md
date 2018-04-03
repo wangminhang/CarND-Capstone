@@ -6,7 +6,7 @@ This is the project repo for the final project of the Udacity Self-Driving Car N
 * Vlad Paunescu [vlad.paunescu@gmail.com](mailto:vlad.paunescu@gmail.com)
 * Frank Carey [fcarey@gmail.com](mailto:fcarey@gmail.com)
 * David Scott [autohandle@yahoo.com](mailto:autohandle@yahoo.com)
-* Minhang Wang [mhwang1988@gmail.com](mailto:mhwang1988@gmail.com)
+* Minhang Wang [wang_min_hang@qq.com](mailto:wang_min_hang@qq.com)
 
 Please use **one** of the two installation options, either native **or** docker installation.
 
